@@ -1,0 +1,5 @@
+## configuration file for Snakemake workflow of short-read assembly comparison
+
+wd: "../"
+
+threads: 16

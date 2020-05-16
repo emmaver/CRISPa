@@ -1,0 +1,257 @@
+######################################################
+#### Pre-processing, assembly and gene prediction ####
+######################################################
+
+#workflow for strains of UZL, UMC and JPP collection
+
+import pandas as pd
+
+configfile: "config.yaml"
+workdir: config['wd']
+
+#load strain names
+tsvu=pd.read_table(config["umcreads"])
+tsvasm=pd.read_table(config["umcasm"])
+
+UMC_R=tsvu["sample"].values.tolist()
+UMC_A=tsvasm["sample"].values.tolist() #UMC samples provided as assembly (not raw reads)
+
+UZL = ["PaLo"+str(i) for i in range(1,48)]
+JPP = ["PaLo422","PaLo419","PaLo418","PaLo323","PaLo375","PaLo402","PaLo326","PaLo310","PaLo297","PaLo288","PaLo226","PaLo287",
+	"PaLo270","PaLo249","PaLo228","PaLo229","PaLo240","PaLo227","PaLo191","PaLo185","PaLo170","PaLo166","PaLo152","PaLo111"]
+
+READS = UZL+UMC_R
+ASM = UZL+UMC_A+UMC_R+JPP
+
+rule all:
+    input:
+        #Illumina read QC before pre-processing (FastQC)
+        expand("qc/fastqc_pre/{sample}/{sample}R1_fastqc.html", sample=READS),
+        #Illumina read trimming/clipping (Trimmomatic) + QC (FastQC)
+        expand("illumina/clean/{sample}/{sample}R1.fastq.gz", sample=READS),
+        expand("qc/fastqc_post/{sample}/{sample}R1_fastqc.html", sample=READS),
+        #Short-read assembly (SPAdes --careful) + QC (QUAST and Bandage)
+        expand("assembly/sr/{sample}/contigs.fasta", sample=READS),
+        expand("qc/quast/sr/{sample}/report.txt", sample=ASM),
+        expand("reports/bandage/sr/{sample}.svg", sample=READS),
+        #Nanopore read trimming (Porechop) + QC (NanoPlot)
+        expand("nanopore/{sample}.trim.fastq.gz", sample=UZL),
+        expand("qc/nanoplot/{sample}/NanoStats.txt", sample=UZL),
+        #Hybrid assembly (Unicycler) + QC (QUAST and Bandage)
+        expand("assembly/lr/{sample}/assembly.fasta", sample=UZL),
+        expand("qc/quast/lr/{sample}/report.txt", sample=UZL),
+        expand("reports/bandage/lr/{sample}.svg", sample=UZL),
+        #mapping + QC (Qualimap)
+        expand("mapping/lr-unicycler/{sample}/{sample}.fasta", sample=UZL),
+        expand("mapping/lr-unicycler/{sample}/{sample}.sorted.bam", sample=UZL),
+        expand("mapping/lr-unicycler/{sample}/{sample}.sorted_stats/qualimapReport.html", sample=UZL),
+        #Gene prediction (Prokka)
+        expand("annotation/prokka-sr/{sample}/{sample}.gbk", sample=ASM),
+		expand("annotation/prokka-lr/{sample}/{sample}.gbk", sample=UZL)
+
+rule fastqc_preqc:
+    input:
+        R1="illumina/raw/{sample}R1.fastq.gz",
+        R2="illumina/raw/{sample}R2.fastq.gz"
+    output:
+        "qc/fastqc_pre/{sample}/{sample}R1_fastqc.html"
+    threads:
+        config['threads']
+    shell:
+        "fastqc -f fastq -t {threads} -o qc/fastqc_pre/{wildcards.sample} {input.R1} && "
+        "fastqc -f fastq -t {threads} -o qc/fastqc_pre/{wildcards.sample} {input.R2}"
+
+rule trimmomatic:
+    input:
+       R1="illumina/raw/{sample}R1.fastq.gz",
+       R2="illumina/raw/{sample}R2.fastq.gz"
+    output:
+        "illumina/clean/{sample}/{sample}R1.fastq.gz",
+        "illumina/clean/{sample}/{sample}R2.fastq.gz",
+        "illumina/clean/{sample}/{sample}.unpaired.fastq.gz"
+    threads:
+        config['threads']
+    shell:
+        "trimmomatic PE -phred33 {input.R1} {input.R2} -threads {threads} "
+        "illumina/clean/{wildcards.sample}/{wildcards.sample}R1.fastq.gz illumina/clean/{wildcards.sample}/{wildcards.sample}R1.unpaired.fastq.gz "
+        "illumina/clean/{wildcards.sample}/{wildcards.sample}R2.fastq.gz illumina/clean/{wildcards.sample}/{wildcards.sample}R2.unpaired.fastq.gz "
+        #"ILLUMINACLIP:/home/r0611244/anaconda2/pkgs/trimmomatic-0.39-1/share/trimmomatic-0.39-1/adapters/NexteraPE-PE.fa:2:30:10 "
+        "ILLUMINACLIP:Snakemake/NexteraPE-PE.fa:2:30:10 "
+        "LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36  2> qc/trimmomatic/{wildcards.sample}.log && "
+        "cat illumina/clean/{wildcards.sample}/{wildcards.sample}R1.unpaired.fastq.gz "
+        "illumina/clean/{wildcards.sample}/{wildcards.sample}R2.unpaired.fastq.gz > "
+        "illumina/clean/{wildcards.sample}/{wildcards.sample}.unpaired.fastq.gz && "
+        "rm illumina/clean/{wildcards.sample}/{wildcards.sample}R2.unpaired.fastq.gz "
+        "illumina/clean/{wildcards.sample}/{wildcards.sample}R1.unpaired.fastq.gz "
+
+rule fastqc_postqc:
+    input:
+        R1="illumina/clean/{sample}/{sample}R1.fastq.gz",
+        R2="illumina/clean/{sample}/{sample}R2.fastq.gz"
+    output:
+        "qc/fastqc_post/{sample}/{sample}R1_fastqc.html"
+    threads:
+        config['threads']
+    shell:
+        "fastqc -f fastq -t {threads} -o qc/fastqc_post/{wildcards.sample} {input.R1} && "
+        "fastqc -f fastq -t {threads} -o qc/fastqc_post/{wildcards.sample} {input.R2}"
+
+rule spades_asm:
+    input:
+        R1="illumina/clean/{sample}/{sample}R1.fastq.gz",
+        R2="illumina/clean/{sample}/{sample}R2.fastq.gz",
+        U="illumina/clean/{sample}/{sample}.unpaired.fastq.gz"
+    output:
+        "assembly/sr/{sample}/contigs.fasta",
+        "assembly/sr/{sample}/assembly_graph.fastg"
+    threads:
+        config['threads']
+    shell:
+        "spades.py -1 {input.R1} -2 {input.R2} -s {input.U} --careful "
+        "-o assembly/sr/{wildcards.sample} -t {threads} "
+
+rule quast_spades:
+    input:
+        "assembly/sr/{sample}/contigs.fasta"
+    output:
+        "qc/quast/sr/{sample}/report.txt"
+    threads:
+        config['threads']
+    shell:
+        "quast.py -o qc/quast/sr/{wildcards.sample} -m 200 "
+        "-t {threads} {input}"
+
+rule bandage_spades:
+    input:
+        "assembly/sr/{sample}/assembly_graph.fastg"
+    output:
+        "reports/bandage/sr/{sample}.svg"
+    shell:
+        "Bandage image {input} {output} "
+        "--colour uniform --height 1000 --width 1500"
+
+rule porechop_nanopore:
+    input:
+        "nanopore/{sample}.fastq.gz"
+    output:
+        "nanopore/{sample}.trim.fastq.gz"
+    threads:
+        config['threads']
+    shell:
+        "porechop -t {threads} -i {input} -o {output}"
+
+rule nanoplot:
+    input:
+        "nanopore/{sample}.trim.fastq.gz"
+    output:
+        "qc/nanoplot/{sample}/NanoStats.txt"
+    threads:
+        config['threads']
+    shell:
+        "NanoPlot -t {threads} -o qc/nanoplot/{wildcards.sample}/ "
+        "--fastq {input}"
+
+rule unicycler_asm:
+    input:
+        R1="illumina/clean/{sample}/{sample}R1.fastq.gz",
+        R2="illumina/clean/{sample}/{sample}R2.fastq.gz",
+        U="illumina/clean/{sample}/{sample}.unpaired.fastq.gz",
+        LR="nanopore/{sample}.trim.fastq.gz"
+    output:
+        "assembly/lr/{sample}/assembly.fasta",
+        "assembly/lr/{sample}/assembly.gfa",
+    threads:
+        config['threads']
+    shell:
+        "unicycler -t {threads} "
+        "-1 {input.R1} -2 {input.R2} -s {input.U} -l {input.LR} "
+        "-o assembly/lr/{wildcards.sample}"
+
+rule quast_lr:
+    input:
+        "assembly/lr/{sample}/assembly.fasta"
+    output:
+        "qc/quast/lr/{sample}/report.txt"
+    threads:
+        config['threads']
+    shell:
+        "quast.py -o qc/quast/lr/{wildcards.sample} -m 200 "
+        "-t {threads} {input}"
+
+rule bandage_unicycler:
+    input:
+        "assembly/lr/{sample}/assembly.gfa"
+    output:
+        "reports/bandage/lr/{sample}.svg"
+    shell:
+        "Bandage image {input} {output} "
+        "--colour uniform --height 1000 --width 1500 "
+
+rule index_asm_unicycler:
+    input:
+        "assembly/lr/{sample}/assembly.fasta"
+    output:
+        "mapping/lr-unicycler/{sample}/{sample}.fasta"
+    shell:
+        "cp {input} {output} && "
+        "bwa index -a bwtsw {output}"
+
+rule mapping_bwa_unicycler:
+    input:
+        R1="illumina/clean/{sample}/{sample}R1.fastq.gz",
+        R2="illumina/clean/{sample}/{sample}R2.fastq.gz",
+        REF="mapping/lr-unicycler/{sample}/{sample}.fasta"
+    output:
+        "mapping/lr-unicycler/{sample}/{sample}.sorted.bam"
+    threads:
+        config['threads']
+    shell:
+        "bwa mem -t {threads} {input.REF} {input.R1} {input.R2} | samtools view -b -o - - | "
+        "samtools sort -o mapping/lr-unicycler/{wildcards.sample}/{wildcards.sample}.sorted.bam - && "
+        "samtools index mapping/lr-unicycler/{wildcards.sample}/{wildcards.sample}.sorted.bam"
+
+rule qualimap_unicycler:
+    input:
+        "mapping/lr-unicycler/{sample}/{sample}.sorted.bam"
+    output:
+        "mapping/lr-unicycler/{sample}/{sample}.sorted_stats/qualimapReport.html"
+    threads:
+        config['threads']
+    shell:
+        "unset DISPLAY && "
+        "qualimap bamqc -bam {input} -nt {threads} "
+        "-outdir mapping/lr-unicycler/{wildcards.sample}/{wildcards.sample}.sorted_stats"
+
+rule prokka_annotation_lr:
+    input:
+        "assembly/lr/{sample}/assembly.fasta"
+    output:
+        "annotation/prokka-lr/{sample}/{sample}.gbk"
+    threads:
+        config['threads']
+    conda:
+        "prokka.yml"
+    shell:
+        "prokka --kingdom Bacteria --cpus {threads} "
+        "--genus Pseudomonas --species aeruginosa --strain {wildcards.sample}"
+        "--locustag {wildcards.sample} --prefix {wildcards.sample} "
+        "--outdir annotation/prokka-lr/{wildcards.sample} --force {input} &&"
+        "cp annotation/prokka-lr/{wildcards.sample}/{wildcards.sample}.txt "
+        "qc/prokka/lr/{wildcards.sample}.txt"
+
+rule prokka_annotation_sr:
+    input:
+        "assembly/sr/{sample}/contigs.fasta"
+    output:
+        "annotation/prokka-sr/{sample}/{sample}.gbk"
+    threads:
+        config['threads']
+    conda:
+        "prokka.yml"
+    shell:
+        "prokka --kingdom Bacteria --cpus {threads} "
+        "--genus Pseudomonas --species aeruginosa --strain {wildcards.sample}"
+        "--locustag {wildcards.sample} --prefix {wildcards.sample} "
+        "--outdir annotation/prokka-sr/{wildcards.sample} --force {input} &&"
+        "cp annotation/prokka-sr/{wildcards.sample}/{wildcards.sample}.txt "
+        "qc/prokka/sr/{wildcards.sample}.txt"

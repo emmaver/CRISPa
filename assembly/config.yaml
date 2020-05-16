@@ -1,0 +1,8 @@
+## configuration file for Snakemake workflow of pre-processing, assembly and gene prediction
+
+wd: "../"
+
+threads: 16
+
+umcasm: /vsc-hard-mounts/leuven-data/325/vsc32567/MT/crispr_annotation/Snakemake/50assembled.tsv
+umcreads: /vsc-hard-mounts/leuven-data/325/vsc32567/MT/crispr_annotation/Snakemake/460samples.tsv

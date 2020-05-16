@@ -1,0 +1,173 @@
+#################################################
+#### Short-read assembly strategy comparison ####
+#################################################
+
+#workflow for comparison of SPAdes (default), SPAdes (--careful) and Shovill
+# on 10 P. aeruginosa strains
+
+configfile: "config.yaml"
+workdir: config['wd']
+
+SAMPLES = ["PaLo1","PaLo2","PaLo3","PaLo4","PaLo5","PaLo6","PaLo7","PaLo8","PaLo9","PaLo10"]
+
+rule all:
+    input:
+        #pre-processing
+        expand("illumina/clean/{sample}/{sample}R1.fastq.gz", sample=SAMPLES),
+        #default SPAdes
+        expand("assembly/spades/{sample}/contigs.fasta", sample=SAMPLES),
+        expand("comparison/quast/{sample}/{sample}_spades.pdf", sample=SAMPLES),
+        expand("comparison/bandage/{sample}/{sample}_spades.svg", sample=SAMPLES),
+        #SPAdes --careful
+        expand("assembly/spades_careful/{sample}/contigs.fasta", sample=SAMPLES),
+        expand("comparison/quast/{sample}/{sample}_spades_careful.pdf", sample=SAMPLES),
+        expand("comparison/bandage/{sample}/{sample}_spades_careful.svg", sample=SAMPLES),
+        #Shovill
+        expand("assembly/shovill/{sample}/contigs.fa", sample=SAMPLES),
+        expand("comparison/quast/{sample}/{sample}_shovill.pdf", sample=SAMPLES),
+        expand("comparison/bandage/{sample}/{sample}_shovill.svg", sample=SAMPLES),
+
+##Pre-processing of paired-end Illumina reads
+rule trimmomatic:
+    input:
+       R1="illumina/raw/{sample}R1.fastq.gz",
+       R2="illumina/raw/{sample}R2.fastq.gz"
+    output:
+        "illumina/clean/{sample}/{sample}R1.fastq.gz",
+        "illumina/clean/{sample}/{sample}R2.fastq.gz",
+        "illumina/clean/{sample}/{sample}.unpaired.fastq.gz"
+    threads:
+        config['threads']
+    benchmark:
+        repeat("comparison/benchmarks/trimmomatic/{sample}.trimmomatic_benchmark.txt",3)
+    shell:
+        "trimmomatic PE -phred33 {input.R1} {input.R2} -threads {threads} "
+        "illumina/clean/{wildcards.sample}/{wildcards.sample}R1.fastq.gz illumina/clean/{wildcards.sample}/{wildcards.sample}R1.unpaired.fastq.gz "
+        "illumina/clean/{wildcards.sample}/{wildcards.sample}R2.fastq.gz illumina/clean/{wildcards.sample}/{wildcards.sample}R2.unpaired.fastq.gz "
+        "ILLUMINACLIP:/home/r0611244/anaconda2/pkgs/trimmomatic-0.39-1/share/trimmomatic-0.39-1/adapters/NexteraPE-PE.fa:2:30:10 "
+        "LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36  2> qc/trimmomatic/{wildcards.sample}.log && "
+        "cat illumina/clean/{wildcards.sample}/{wildcards.sample}R1.unpaired.fastq.gz "
+        "illumina/clean/{wildcards.sample}/{wildcards.sample}R2.unpaired.fastq.gz > "
+        "illumina/clean/{wildcards.sample}/{wildcards.sample}.unpaired.fastq.gz && "
+        "rm illumina/clean/{wildcards.sample}/{wildcards.sample}R2.unpaired.fastq.gz "
+        "illumina/clean/{wildcards.sample}/{wildcards.sample}R1.unpaired.fastq.gz "
+
+##Strategy 1: SPAdes default
+rule spades_asm:
+    input:
+        R1="illumina/clean/{sample}/{sample}R1.fastq.gz",
+        R2="illumina/clean/{sample}/{sample}R2.fastq.gz",
+        U="illumina/clean/{sample}/{sample}.unpaired.fastq.gz"
+    output:
+        "assembly/spades/{sample}/contigs.fasta",
+        "assembly/spades/{sample}/assembly_graph.fastg"
+    threads:
+        config['threads']
+    benchmark:
+        repeat("comparison/benchmarks/spades/{sample}.spades_benchmark.txt",3)
+    shell:
+        "spades.py -1 {input.R1} -2 {input.R2} -s {input.U} "
+        "-o assembly/spades/{wildcards.sample} -t {threads}"
+
+#contiguity assessment with QUAST
+rule quast_spades:
+    input:
+        "assembly/spades/{sample}/contigs.fasta"
+    output:
+        "comparison/quast/{sample}/{sample}_spades.pdf"
+    threads:
+        config['threads']
+    shell:
+        "quast.py -o qc/quast/spades/{wildcards.sample} "
+        "-t {threads} {input} && "
+        "cp qc/quast/spades/{wildcards.sample}/report.pdf "
+        "comparison/quast/{wildcards.sample}/{wildcards.sample}_spades.pdf"
+
+#assembly graph visualization with Bandage
+rule bandage_spades:
+    input:
+        "assembly/spades/{sample}/assembly_graph.fastg"
+    output:
+        "comparison/bandage/{sample}/{sample}_spades.svg"
+    shell:
+        "Bandage image {input} {output} "
+        "--colour uniform --height 1000 --width 1500"
+
+##Strategy 2: SPAdes --careful
+rule spades_careful_asm:
+    input:
+        R1="illumina/clean/{sample}/{sample}R1.fastq.gz",
+        R2="illumina/clean/{sample}/{sample}R2.fastq.gz",
+        U="illumina/clean/{sample}/{sample}.unpaired.fastq.gz"
+    output:
+        "assembly/spades_careful/{sample}/contigs.fasta",
+        "assembly/spades_careful/{sample}/assembly_graph.fastg"
+    threads:
+        config['threads']
+    benchmark:
+        repeat("comparison/benchmarks/spades_careful/{sample}.spades_careful_benchmark.txt",3)
+    shell:
+        "spades.py -1 {input.R1} -2 {input.R2} -s {input.U} --careful "
+        "-o assembly/spades_careful/{wildcards.sample} -t {threads}"
+
+#contiguity assessment with QUAST
+rule quast_spades_careful:
+    input:
+        "assembly/spades_careful/{sample}/contigs.fasta"
+    output:
+        "comparison/quast/{sample}/{sample}_spades_careful.pdf"
+    threads:
+        config['threads']
+    shell:
+        "quast.py -o qc/quast/spades_careful/{wildcards.sample} "
+        "-t {threads} {input} && "
+        "cp qc/quast/spades_careful/{wildcards.sample}/report.pdf "
+        "comparison/quast/{wildcards.sample}/{wildcards.sample}_spades_careful.pdf"
+
+#assembly graph visualization with Bandage
+rule bandage_spades_careful:
+    input:
+        "assembly/spades_careful/{sample}/assembly_graph.fastg"
+    output:
+        "comparison/bandage/{sample}/{sample}_spades_careful.svg"
+    shell:
+        "Bandage image {input} {output} "
+        "--colour uniform --height 1000 --width 1500"
+
+##Strategy 3: Shovill (takes raw reads)
+rule shovill_asm:
+    input:
+        R1="illumina/raw/{sample}R1.fastq.gz",
+        R2="illumina/raw/{sample}R2.fastq.gz",
+    output:
+        "assembly/shovill/{sample}/contigs.fa",
+        "assembly/shovill/{sample}/contigs.gfa"
+    benchmark:
+        repeat("comparison/benchmarks/shovill/{sample}.shovill_benchmark.txt",3)
+    shell:
+        "shovill --force -outdir assembly/shovill/{wildcards.sample} "
+        "-R1 {input.R1} -R2 {input.R2}"
+
+#contiguity assessment with QUAST
+rule quast_shovill:
+    input:
+        "assembly/shovill/{sample}/contigs.fa"
+    output:
+        "comparison/quast/{sample}/{sample}_shovill.pdf"
+    threads:
+        config['threads']
+    shell:
+        "quast.py -o qc/quast/shovill/{wildcards.sample} "
+        "-t {threads} {input} && "
+        "cp qc/quast/shovill/{wildcards.sample}/report.pdf "
+        "comparison/quast/{wildcards.sample}/{wildcards.sample}_shovill.pdf"
+
+#assembly graph visualization with Bandage
+rule bandage_shovill:
+    input:
+        "assembly/shovill/{sample}/contigs.gfa"
+    output:
+        "comparison/bandage/{sample}/{sample}_shovill.svg"
+    shell:
+        "Bandage image {input} {output} "
+        "--colour uniform --height 1000 --width 1500"
