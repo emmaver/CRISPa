@@ -1,0 +1,251 @@
+###############################################
+#### CRISPR-Cas and anti-CRISPR annotation ####
+###############################################
+
+#workflow for P. aeruginosa samples from all collections
+# + the anti-CRISPR detection in 25 Pseudomonas phages
+
+import pandas as pd
+
+configfile: "config.yaml"
+
+#load strain names
+tsvu=pd.read_table(config["umcreads"])
+tsvasm=pd.read_table(config["umcasm"])
+tsvncbi=pd.read_table(config["ncbi"])
+
+UMC_R=tsvu["sample"].values.tolist()
+UMC_A=tsvasm["sample"].values.tolist() #UMC samples provided as assembly (not raw reads)
+NCBI=tsvncbi["sample"].values.tolist()
+EXCLNCBI=["GCF_900168095.1_IMG-taxon_2606217733_annotated_assembly","GCF_900167195.1_IMG-taxon_2568526011_annotated_assembly"]
+	#error in CRISPRCasFinder for these published genomes
+
+UZL = ["PaLo"+str(i) for i in range(1,48)]
+JPP = ["PaLo422","PaLo419","PaLo418","PaLo323","PaLo375","PaLo402","PaLo326","PaLo310","PaLo297","PaLo288","PaLo226","PaLo287",
+	"PaLo270","PaLo249","PaLo228","PaLo229","PaLo240","PaLo227","PaLo191","PaLo185","PaLo170","PaLo166","PaLo152","PaLo111"]
+
+SR = UMC_A+UMC_R
+LR = UZL+JPP
+
+PHAGES = ["14-1","EL","KT28","KTN4","KTN6","LBL3","LIT1","LKA1","LKD16","LMA2",
+		"LPB1","LUZ19","LUZ24","LUZ7","PB1","PEV2","phiKMV","phiKZ",
+		"9111","9148","LSL4","PAK3","PT6","LUZ14"]
+
+workdir: config['wd']
+
+#command to run CRISPRCasFinder
+    #for lr     snakemake --use-singularity --singularity-args "-B ../crispr_annotation/assembly/lr/:/opt/data/ -B crispr/lr/CRISPRCasFinder/:/opt/results/"
+    #for sr     snakemake --use-singularity --singularity-args "-B ../crispr_annotation/assembly/sr/:/opt/data/ -B crispr/sr/CRISPRCasFinder/:/opt/results/"
+	#for ncbi 	snakemake --use-singularity --singularity-args "-B ../crispr_annotation/NCBI/genomes/:/opt/data/ -B crispr/ncbi/CRISPRCasFinder/:/opt/results/"
+
+rule all:
+    input:
+	#CRISPR-Cas detection (CRISPRCasFinder)
+    expand("crispr/lr/CRISPRCasFinder/{sample}/TSV/CRISPR-Cas_summary.tsv", sample=LR),
+	expand("crispr/ncbi/CRISPRCasFinder/{sample}/TSV/CRISPR-Cas_summary.tsv", sample=[sample for sample in NCBI if sample not in EXCLNCBI]),
+	expand("crispr/sr/CRISPRCasFinder/{sample}/TSV/CRISPR-Cas_summary.tsv", sample=SR),
+	#Parse results (custom Python scripts)
+	expand("crispr/lr/output/{sample}_lr_ccf.csv", sample=LR),
+	expand("crispr/ncbi/output/{sample}_ccf.csv", sample=[sample for sample in NCBI if sample not in EXCLNCBI]),
+    expand("crispr/sr/output/{sample}_sr_ccf.csv", sample=SR),
+	#anti-CRISPR detection (AcrFinder)
+	expand("../anticrispr/acr/lr/{sample}/benchmark.txt",sample=LR),
+	expand("../anticrispr/acr/sr/{sample}/benchmark.txt",sample=SR+UZL), #also UZL: to make draft vs. complete comparison
+	expand("../anticrispr/acr/ncbi/{sample}/benchmark.txt",sample=[sample for sample in NCBI if sample not in EXCLNCBI]),
+	expand("../anticrispr/phages/output/{sample}/benchmark.txt", sample = PHAGES),
+	#Parse results (custom Python scripts)
+	expand("../anticrispr/output/lr/{sample}_acr.csv", sample=LR),
+	expand("../anticrispr/output/sr/{sample}_acr.csv", sample=SR),
+	expand("../anticrispr/output/ncbi/{sample}_acr.csv", sample=[sample for sample in NCBI if sample not in EXCLNCBI])
+
+
+rule crisprcasfinder_lr:
+    input:
+        "../crispr_annotation/assembly/lr/{sample}/assembly.fasta"
+    output:
+        "crispr/lr/CRISPRCasFinder/{sample}/TSV/CRISPR-Cas_summary.tsv",
+        "crispr/lr/CRISPRCasFinder/{sample}/TSV/Crisprs_REPORT.tsv"
+    singularity:
+        "docker://lignjoslav/crispr_cas_finder"
+    params:
+        i="/opt/data/{sample}",
+        o="/opt/results/{sample}"
+    shell:
+        "rm -rf /opt/results/{wildcards.sample} &&"
+        "export PATH=$PATH:/opt/CRISPRCasFinder/bin && "
+        "export MACSY_HOME=/opt/CRISPRCasFinder/macsyfinder-1.0.5 && "
+		"mkdir -p /opt/results/tmp_{wildcards.sample} && "
+        "cd /opt/results/tmp_{wildcards.sample} && "
+        "perl /opt/CRISPRCasFinder/CRISPRCasFinder.pl -cas -levelMin 3 -ccvRep -vi 8000 -ccc 10000 "
+        "-so /opt/CRISPRCasFinder/sel392v2.so -log "
+        "-in {params.i}/assembly.fasta "
+        "-out {params.o}/"
+
+
+rule parse_lr_ccf:
+    input:
+        "crispr/lr/CRISPRCasFinder/{sample}/TSV/CRISPR-Cas_summary.tsv",
+        "crispr/lr/CRISPRCasFinder/{sample}/TSV/Crisprs_REPORT.tsv"
+    output:
+        "crispr/lr/output/{sample}_lr_ccf.csv"
+    script:
+        'new_parse_CCFoutput.py'
+
+
+rule crisprcasfinder_ncbi:
+    input:
+        "../crispr_annotation/NCBI/genomes/{sample}/{sample}_genomic.fna.gz",
+    output:
+        "crispr/ncbi/CRISPRCasFinder/{sample}/TSV/CRISPR-Cas_summary.tsv",
+        "crispr/ncbi/CRISPRCasFinder/{sample}/TSV/Crisprs_REPORT.tsv"
+    singularity:
+        "docker://lignjoslav/crispr_cas_finder"
+    params:
+        i="/opt/data/{sample}",
+        o="/opt/results/{sample}"
+    shell:
+        "rm -rf /opt/results/{wildcards.sample} &&"
+        "export PATH=$PATH:/opt/CRISPRCasFinder/bin && "
+        "export MACSY_HOME=/opt/CRISPRCasFinder/macsyfinder-1.0.5 && "
+        "mkdir -p /opt/results/tmp_{wildcards.sample} && "
+        "cd /opt/results/tmp_{wildcards.sample} && "
+		"gunzip {params.i}/*fna* && "
+        "perl /opt/CRISPRCasFinder/CRISPRCasFinder.pl -cas -levelMin 3 -ccvRep -vi 8000 -ccc 10000"
+        "-so /opt/CRISPRCasFinder/sel392v2.so -log "
+        "-in {params.i}/{wildcards.sample}_genomic.fna "
+        "-out {params.o}/ &&"
+		"gzip {params.i}/*fna* &&"
+		"rm -rf /opt/results/tmp_{wildcards.sample}"
+
+
+rule parse_ncbi_ccf:
+    input:
+        "crispr/ncbi/CRISPRCasFinder/{sample}/TSV/CRISPR-Cas_summary.tsv",
+        "crispr/ncbi/CRISPRCasFinder/{sample}/TSV/Crisprs_REPORT.tsv"
+    output:
+        "crispr/ncbi/output/{sample}_ccf.csv"
+    script:
+        "new_parse_CCFoutput.py"
+
+
+rule crisprcasfinder_sr:
+    input:
+        "../crispr_annotation/assembly/sr/{sample}/contigs.fasta"
+    output:
+        "crispr/sr/CRISPRCasFinder/{sample}/TSV/CRISPR-Cas_summary.tsv",
+        "crispr/sr/CRISPRCasFinder/{sample}/TSV/Crisprs_REPORT.tsv"
+    singularity:
+        "docker://lignjoslav/crispr_cas_finder"
+    params:
+        i="/opt/data/{sample}",
+        o="/opt/results/{sample}"
+    shell:
+        "rm -rf /opt/results/{wildcards.sample} &&"
+        "export PATH=$PATH:/opt/CRISPRCasFinder/bin && "
+        "export MACSY_HOME=/opt/CRISPRCasFinder/macsyfinder-1.0.5 && "
+        "mkdir -p /opt/results/tmp_{wildcards.sample} && "
+        "cd /opt/results/tmp_{wildcards.sample} && "
+        "perl /opt/CRISPRCasFinder/CRISPRCasFinder.pl -cas -levelMin 3 -ccvRep -vi 8000 -ccc 10000 "
+        "-so /opt/CRISPRCasFinder/sel392v2.so -log "
+        "-in {params.i}/contigs.fasta "
+        "-out {params.o}/"
+
+rule parse_sr_ccf:
+    input:
+        "crispr/sr/CRISPRCasFinder/{sample}/TSV/CRISPR-Cas_summary.tsv",
+        "crispr/sr/CRISPRCasFinder/{sample}/TSV/Crisprs_REPORT.tsv"
+    output:
+        "crispr/sr/output/{sample}_sr_ccf.csv"
+    script:
+        "new_parse_CCFoutput.py"
+
+rule acr_lr:
+	input:
+		n="/scratch/leuven/325/vsc32567/MT/crispr_annotation/assembly/lr/{sample}/assembly.fasta",
+		json="/scratch/leuven/325/vsc32567/MT/crispr_comparison/crispr/lr/CRISPRCasFinder/{sample}/result.json"
+	output: #when no CC, there's almost no output so take benchmark as output
+		"../anticrispr/acr/lr/{sample}/benchmark.txt"
+	benchmark:
+		"../anticrispr/acr/lr/{sample}/benchmark.txt"
+	conda:
+		"acr_env.yml"
+	shell:
+		"cd ../anticrispr/acrfinder/ && mkdir -p ../acr/lr/{wildcards.sample}/CRISPRCas_OUTPUT/ && "
+		"cp {input.json} ../acr/lr/{wildcards.sample}/CRISPRCas_OUTPUT && "
+		"python3 acr_aca_cri_runner.py -n {input.n} -z B -o ../acr/lr/{wildcards.sample} "
+		"-t dependencies/diamond_query/Pa-aca.faa --num_threads 24"
+
+rule parse_lr_acr:
+    input:
+        "../anticrispr/acr/lr/{sample}/benchmark.txt",
+    output:
+        "../anticrispr/output/lr/{sample}_acr.csv"
+    shell:
+		#parser arguments: sample, path of Acrfinder output files, name of parsed file (csv)
+        "python Snakemake/acr_parser.py {wildcards.sample} ../anticrispr/acr/lr/{wildcards.sample}/ "
+		"../anticrispr/output/lr/{wildcards.sample}_acr.csv"
+
+rule acr_sr:
+	input:
+		n="/scratch/leuven/325/vsc32567/MT/crispr_annotation/assembly/sr/50/{sample}/contigs.fasta",
+		json="/scratch/leuven/325/vsc32567/MT/crispr_comparison/crispr/sr/CRISPRCasFinder/{sample}/result.json"
+	output:
+		"../anticrispr/acr/sr/{sample}/benchmark.txt"
+	benchmark:
+		"../anticrispr/acr/sr/{sample}/benchmark.txt"
+	conda:
+		"acr_env.yml"
+	shell:
+		"cd ../anticrispr/acrfinder/ && mkdir -p ../acr/sr/{wildcards.sample}/CRISPRCas_OUTPUT/ && "
+		"cp {input.json} ../acr/sr/{wildcards.sample}/CRISPRCas_OUTPUT && "
+		"python3 acr_aca_cri_runner.py -n {input.n} -z B -o ../acr/sr/{wildcards.sample} "
+		"-t dependencies/diamond_query/Pa-aca.faa --num_threads 24"
+
+rule parse_sr_acr:
+    input:
+        "../anticrispr/acr/sr/{sample}/benchmark.txt",
+    output:
+        "../anticrispr/output/sr/{sample}_acr.csv"
+    shell:
+        "python Snakemake/acr_parser.py {wildcards.sample} ../anticrispr/acr/sr/{wildcards.sample}/ "
+		"../anticrispr/output/sr/{wildcards.sample}_acr.csv"
+
+rule acr_ncbi:
+	input:
+		ngz="/scratch/leuven/325/vsc32567/MT/crispr_annotation/NCBI/genomes/{sample}/{sample}_genomic.fna.gz",
+		json="/scratch/leuven/325/vsc32567/MT/crispr_comparison/crispr/ncbi/CRISPRCasFinder/{sample}/result.json"
+	output:
+		"../anticrispr/acr/ncbi/{sample}/benchmark.txt"
+	benchmark:
+		"../anticrispr/acr/ncbi/{sample}/benchmark.txt"
+	conda:
+		"acr_env.yml"
+	shell:
+		"cd ../anticrispr/acrfinder/ && mkdir -p ../acr/ncbi/{wildcards.sample}/CRISPRCas_OUTPUT/ && "
+		"cp {input.json} ../acr/ncbi/{wildcards.sample}/CRISPRCas_OUTPUT && "
+		"gunzip {input.ngz} && "
+		"python3 acr_aca_cri_runner.py -n ../../crispr_annotation/NCBI/genomes/{wildcards.sample}/{wildcards.sample}_genomic.fna -z B -o ../acr/ncbi/{wildcards.sample} "
+		"-t dependencies/diamond_query/Pa-aca.faa --num_threads 24 && "
+		"gzip ../../crispr_annotation/NCBI/genomes/{wildcards.sample}/{wildcards.sample}_genomic.fna"
+
+rule parse_ncbi_acr:
+    input:
+        "../anticrispr/acr/ncbi/{sample}/benchmark.txt",
+    output:
+        "../anticrispr/output/ncbi/{sample}_acr.csv"
+   shell:
+		"python Snakemake/acr_parser_ncbi.py {wildcards.sample} ../anticrispr/acr/ncbi/{wildcards.sample}/ "
+		"../anticrispr/output/ncbi/{wildcards.sample}_acr.csv"
+
+rule acr_phage:
+	input:
+		n="/scratch/leuven/325/vsc32567/MT/anticrispr/phages/genomes/{sample}.fasta",
+	output:
+		"../anticrispr/phages/output/{sample}/benchmark.txt"
+	benchmark:
+		"../anticrispr/phages/output/{sample}/benchmark.txt"
+	conda:
+		"acr_env.yml"
+	shell:
+		"cd ../anticrispr/acrfinder/ && "
+		"python3 acr_aca_cri_runner.py -n {input.n} -z V -o ../phages/output/{wildcards.sample}"

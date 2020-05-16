@@ -1,0 +1,9 @@
+## configuration file for Snakemake workflow of CRISPR-Cas and anti-CRISPR annotation
+
+wd: "../"
+
+threads: 16
+
+umcasm: /vsc-hard-mounts/leuven-data/325/vsc32567/MT/crispr_annotation/Snakemake/50assembled.tsv
+umcreads: /vsc-hard-mounts/leuven-data/325/vsc32567/MT/crispr_annotation/Snakemake/460samples.tsv
+ncbi: /ddn1/vol1/site_scratch/leuven/325/vsc32567/MT/crispr_comparison/Snakemake/ncbistrains.tsv

@@ -1,0 +1,146 @@
+####################################
+#### CRISPR-Cas tool comparison ####
+####################################
+
+# First: comparison of CASC, CRISPRDetect and CRISPRCasFinder
+# using the UZL collection of P. aeruginosa hybrid assemblies
+# and references  UCBPP-PA14, PAO1 and LESB58
+
+# Next: comparison of draft vs complete input for CRISPRCasFinder ('sr' vs. 'lr')
+
+import pandas as pd
+
+configfile: "config.yaml"
+workdir: config['wd']
+
+UZL = ["PaLo"+str(i) for i in range(1,48)]
+REFERENCES = ["UCBPP-PA14", "PAO1","LESB58"]
+
+#command to run CRISPRCasFinder
+    #for references and lr:     snakemake --use-singularity --singularity-args "-B /mnt/blastdb/emma/crispr_annotation/assembly/lr/:/opt/data/ -B crispr/lr/CRISPRCasFinder/:/opt/results/"
+    #for sr                     snakemake --use-singularity --singularity-args "-B ../crispr_annotation/assembly/sr/:/opt/data/ -B crispr/sr/CRISPRCasFinder/:/opt/results/"
+
+
+rule all:
+    input:
+        #CASC + parsing
+        expand("crispr/lr/CASC/{sample}/casc.log", sample=UZL+REFERENCES),
+        expand("crispr/lr/output/{sample}_lr_casc.csv", sample=UZL+REFERENCES),
+        #CRISPRDetect + parsing
+        expand("crispr/lr/CRISPRDetect/{sample}/{sample}", sample=UZL+REFERENCES),
+        expand("crispr/lr/output/{sample}_lr_cd.csv", sample=UZL+REFERENCES),
+        #CRISPRCasFinder (lr and sr) + parsing
+        expand("crispr/lr/CRISPRCasFinder/{sample}/TSV/CRISPR-Cas_summary.tsv", sample=UZL+REFERENCES),
+        expand("crispr/sr/CRISPRCasFinder/{sample}/TSV/CRISPR-Cas_summary.tsv", sample=UZL),
+        expand("crispr/lr/output/{sample}_lr_ccf.csv", sample=UZL+REFERENCES),
+        expand("crispr/sr/output/{sample}_sr_ccf.csv", sample=UZL)
+
+
+rule casc_lr:
+    input:
+        "/mnt/blastdb/emma/crispr_annotation/assembly/lr/{sample}/assembly.fasta"
+    output:
+        "crispr/lr/CASC/{sample}/casc.log"
+    threads:
+        config['threads']
+    benchmark:
+        repeat("crispr/lr/CASC/{sample}/benchmark.txt",3)
+    shell:
+        "cd /mnt/blastdb/emma/crispr_tools/CASC/bin &&"
+        "./casc -i {input} "
+        "-o /mnt/blastdb/emma/crispr_comparison/crispr/lr/CASC/{wildcards.sample}/ "
+        "--ncpus {threads}"
+
+rule parse_lr_casc:
+    input:
+        "crispr/lr/CASC/{sample}/casc.log",
+        "crispr/lr/CASC/{sample}/benchmark.txt",
+    output:
+        "crispr/lr/output/{sample}_lr_casc.csv"
+    script:
+        'parse_CASCoutput.py'
+
+rule crisprdetect_lr:
+    input:
+        "../crispr_annotation/assembly/lr/{sample}/assembly.fasta"
+    output:
+        "crispr/lr/CRISPRDetect/{sample}/{sample}"
+    threads:
+        config['threads']
+    benchmark:
+        repeat("crispr/lr/CRISPRDetect/{sample}/benchmark.txt",3)
+    shell:
+        "perl /mnt/blastdb/emma/crispr_tools/CRISPRDetect/CRISPRDetect_2.2/CRISPRDetect.pl "
+        "-f {input} -o crispr/lr/CRISPRDetect/{wildcards.sample}/{wildcards.sample} "
+        "-T {threads} -array_quality_score_cutoff 3"
+
+rule parse_lr_cd:
+    input:
+        "crispr/lr/CRISPRDetect/{sample}/{sample}",
+        "crispr/lr/CRISPRDetect/{sample}/benchmark.txt"
+    output:
+        "crispr/lr/output/{sample}_lr_cd.csv"
+    script:
+        'parse_CDoutput.py'
+
+rule crisprcasfinder_lr:
+    input:
+        "../crispr_annotation/assembly/lr/{sample}/assembly.fasta"
+    output:
+        "crispr/lr/CRISPRCasFinder/{sample}/TSV/CRISPR-Cas_summary.tsv",
+        "crispr/lr/CRISPRCasFinder/{sample}/TSV/Crisprs_REPORT.tsv"
+    singularity:
+        "docker://lignjoslav/crispr_cas_finder"
+    params:
+        i="/opt/data/{sample}",
+        o="/opt/results/{sample}"
+    benchmark:
+        repeat("crispr/lr/CRISPRCasFinder/{sample}/benchmark.txt",3)
+    shell:
+        "rm -rf /opt/results/{wildcards.sample} &&"
+        "export PATH=$PATH:/opt/CRISPRCasFinder/bin && "
+        "export MACSY_HOME=/opt/CRISPRCasFinder/macsyfinder-1.0.5 && "
+        "perl /opt/CRISPRCasFinder/CRISPRCasFinder.pl -cas -levelMin 3 -ccvRep "
+        "-so /opt/CRISPRCasFinder/sel392v2.so -log "
+        "-in {params.i}/assembly.fasta "
+        "-out {params.o}/"
+
+rule parse_lr_ccf:
+    input:
+        "crispr/lr/CRISPRCasFinder/{sample}/TSV/CRISPR-Cas_summary.tsv",
+        "crispr/lr/CRISPRCasFinder/{sample}/benchmark.txt",
+        "crispr/lr/CRISPRCasFinder/{sample}/TSV/Crisprs_REPORT.tsv"
+    output:
+        "crispr/lr/output/{sample}_lr_ccf.csv"
+    script:
+        'parse_CCFoutput.py'
+
+rule crisprcasfinder_sr:
+    input:
+        "../crispr_annotation/assembly/sr/{sample}/contigs.fasta"
+    output:
+        "crispr/sr/CRISPRCasFinder/{sample}/TSV/CRISPR-Cas_summary.tsv",
+        "crispr/sr/CRISPRCasFinder/{sample}/TSV/Crisprs_REPORT.tsv"
+    singularity:
+        "docker://lignjoslav/crispr_cas_finder"
+    params:
+        i="/opt/data/{sample}",
+        o="/opt/results/{sample}"
+    shell:
+        "rm -rf /opt/results/{wildcards.sample} &&"
+        "export PATH=$PATH:/opt/CRISPRCasFinder/bin && "
+        "export MACSY_HOME=/opt/CRISPRCasFinder/macsyfinder-1.0.5 && "
+        "cd /opt/results/{sample} && "
+        "perl /opt/CRISPRCasFinder/CRISPRCasFinder.pl -cas -levelMin 3 -ccvRep "
+        "-so /opt/CRISPRCasFinder/sel392v2.so -log "
+        "-in {params.i}/contigs.fasta "
+        "-out {params.o}/"
+
+rule parse_sr_ccf:
+    input:
+        "crispr/sr/CRISPRCasFinder/{sample}/TSV/CRISPR-Cas_summary.tsv",
+        "crispr/sr/CRISPRCasFinder/{sample}/TSV/Crisprs_REPORT.tsv"
+    output:
+        "crispr/sr/output/{sample}_sr_ccf.csv"
+    script:
+        "new_parse_CCFoutput.py"
