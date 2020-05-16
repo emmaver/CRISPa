@@ -47,7 +47,7 @@ rule all:
         expand("mapping/lr-unicycler/{sample}/{sample}.sorted_stats/qualimapReport.html", sample=UZL),
         #Gene prediction (Prokka)
         expand("annotation/prokka-sr/{sample}/{sample}.gbk", sample=ASM),
-		expand("annotation/prokka-lr/{sample}/{sample}.gbk", sample=UZL)
+	expand("annotation/prokka-lr/{sample}/{sample}.gbk", sample=UZL)
 
 rule fastqc_preqc:
     input:
