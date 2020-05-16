@@ -36,7 +36,7 @@ workdir: config['wd']
 #command to run CRISPRCasFinder
     #for lr     snakemake --use-singularity --singularity-args "-B ../crispr_annotation/assembly/lr/:/opt/data/ -B crispr/lr/CRISPRCasFinder/:/opt/results/"
     #for sr     snakemake --use-singularity --singularity-args "-B ../crispr_annotation/assembly/sr/:/opt/data/ -B crispr/sr/CRISPRCasFinder/:/opt/results/"
-	#for ncbi 	snakemake --use-singularity --singularity-args "-B ../crispr_annotation/NCBI/genomes/:/opt/data/ -B crispr/ncbi/CRISPRCasFinder/:/opt/results/"
+    #for ncbi 	snakemake --use-singularity --singularity-args "-B ../crispr_annotation/NCBI/genomes/:/opt/data/ -B crispr/ncbi/CRISPRCasFinder/:/opt/results/"
 
 rule all:
     input:
@@ -74,7 +74,7 @@ rule crisprcasfinder_lr:
         "rm -rf /opt/results/{wildcards.sample} &&"
         "export PATH=$PATH:/opt/CRISPRCasFinder/bin && "
         "export MACSY_HOME=/opt/CRISPRCasFinder/macsyfinder-1.0.5 && "
-		"mkdir -p /opt/results/tmp_{wildcards.sample} && "
+	"mkdir -p /opt/results/tmp_{wildcards.sample} && "
         "cd /opt/results/tmp_{wildcards.sample} && "
         "perl /opt/CRISPRCasFinder/CRISPRCasFinder.pl -cas -levelMin 3 -ccvRep -vi 8000 -ccc 10000 "
         "-so /opt/CRISPRCasFinder/sel392v2.so -log "
