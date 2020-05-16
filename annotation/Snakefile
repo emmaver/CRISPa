@@ -41,13 +41,13 @@ workdir: config['wd']
 rule all:
     input:
 	#CRISPR-Cas detection (CRISPRCasFinder)
-    expand("crispr/lr/CRISPRCasFinder/{sample}/TSV/CRISPR-Cas_summary.tsv", sample=LR),
+    	expand("crispr/lr/CRISPRCasFinder/{sample}/TSV/CRISPR-Cas_summary.tsv", sample=LR),
 	expand("crispr/ncbi/CRISPRCasFinder/{sample}/TSV/CRISPR-Cas_summary.tsv", sample=[sample for sample in NCBI if sample not in EXCLNCBI]),
 	expand("crispr/sr/CRISPRCasFinder/{sample}/TSV/CRISPR-Cas_summary.tsv", sample=SR),
 	#Parse results (custom Python scripts)
 	expand("crispr/lr/output/{sample}_lr_ccf.csv", sample=LR),
 	expand("crispr/ncbi/output/{sample}_ccf.csv", sample=[sample for sample in NCBI if sample not in EXCLNCBI]),
-    expand("crispr/sr/output/{sample}_sr_ccf.csv", sample=SR),
+    	expand("crispr/sr/output/{sample}_sr_ccf.csv", sample=SR),
 	#anti-CRISPR detection (AcrFinder)
 	expand("../anticrispr/acr/lr/{sample}/benchmark.txt",sample=LR),
 	expand("../anticrispr/acr/sr/{sample}/benchmark.txt",sample=SR+UZL), #also UZL: to make draft vs. complete comparison
@@ -109,13 +109,13 @@ rule crisprcasfinder_ncbi:
         "export MACSY_HOME=/opt/CRISPRCasFinder/macsyfinder-1.0.5 && "
         "mkdir -p /opt/results/tmp_{wildcards.sample} && "
         "cd /opt/results/tmp_{wildcards.sample} && "
-		"gunzip {params.i}/*fna* && "
+	"gunzip {params.i}/*fna* && "
         "perl /opt/CRISPRCasFinder/CRISPRCasFinder.pl -cas -levelMin 3 -ccvRep -vi 8000 -ccc 10000"
         "-so /opt/CRISPRCasFinder/sel392v2.so -log "
         "-in {params.i}/{wildcards.sample}_genomic.fna "
         "-out {params.o}/ &&"
-		"gzip {params.i}/*fna* &&"
-		"rm -rf /opt/results/tmp_{wildcards.sample}"
+	"gzip {params.i}/*fna* &&"
+	"rm -rf /opt/results/tmp_{wildcards.sample}"
 
 
 rule parse_ncbi_ccf:
@@ -181,9 +181,9 @@ rule parse_lr_acr:
     output:
         "../anticrispr/output/lr/{sample}_acr.csv"
     shell:
-		#parser arguments: sample, path of Acrfinder output files, name of parsed file (csv)
+	#parser arguments: sample, path of Acrfinder output files, name of parsed file (csv)
         "python Snakemake/acr_parser.py {wildcards.sample} ../anticrispr/acr/lr/{wildcards.sample}/ "
-		"../anticrispr/output/lr/{wildcards.sample}_acr.csv"
+	"../anticrispr/output/lr/{wildcards.sample}_acr.csv"
 
 rule acr_sr:
 	input:
@@ -208,7 +208,7 @@ rule parse_sr_acr:
         "../anticrispr/output/sr/{sample}_acr.csv"
     shell:
         "python Snakemake/acr_parser.py {wildcards.sample} ../anticrispr/acr/sr/{wildcards.sample}/ "
-		"../anticrispr/output/sr/{wildcards.sample}_acr.csv"
+	"../anticrispr/output/sr/{wildcards.sample}_acr.csv"
 
 rule acr_ncbi:
 	input:
@@ -233,9 +233,9 @@ rule parse_ncbi_acr:
         "../anticrispr/acr/ncbi/{sample}/benchmark.txt",
     output:
         "../anticrispr/output/ncbi/{sample}_acr.csv"
-   shell:
-		"python Snakemake/acr_parser_ncbi.py {wildcards.sample} ../anticrispr/acr/ncbi/{wildcards.sample}/ "
-		"../anticrispr/output/ncbi/{wildcards.sample}_acr.csv"
+    shell:
+	"python Snakemake/acr_parser_ncbi.py {wildcards.sample} ../anticrispr/acr/ncbi/{wildcards.sample}/ "
+	"../anticrispr/output/ncbi/{wildcards.sample}_acr.csv"
 
 rule acr_phage:
 	input:
