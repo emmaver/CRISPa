@@ -1,6 +1,6 @@
 This folder contains 4 scripts which follow each other logically (the dataset is gradually built up).
 
-#### 1. asm_data_consolidation
+#### 1. asm_data_consolidation.R
 
 First script in which the NCBI genomes are filtered, genome size distribution is constructed and assembly results are assessed.
 
